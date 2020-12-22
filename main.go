@@ -39,13 +39,20 @@ type Response struct {
 	Items []LiveItem `json:"items"`
 }
 
+var configPath string
 var cfg config.Config
+var channelReq []*http.Request
 func init() {
+	reloadConfig()
+}
+
+func reloadConfig() {
 	// command line args
 	confPtr := flag.String("conf", "config.json", "Path to the config file")
+	configPath = *confPtr
 
 	// read config
-	cfg = config.ReadConfig(*confPtr)
+	cfg = config.ReadConfig(configPath)
 
 	// output to stdout instead of the default stderr
 	// can be any io.Writer, see below for File example
@@ -69,6 +76,25 @@ func init() {
 		log.SetLevel(log.InfoLevel)
 	}
 	log.Debugln("cfg:", cfg)
+
+	channelReq = make([]*http.Request, len(cfg.Channels))
+	for index, channel := range cfg.Channels {
+		url := fmt.Sprintf("https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=%s&type=video&eventType=live&key=%s", channel.ID, cfg.APIKey)
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			log.Fatalf("cannot new httpRequest: %v\n", err)
+			os.Exit(-1)
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_0_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36")
+		req.Header.Set("Host", "www.youtube.com")
+		channelReq[index] = req
+
+		err = os.MkdirAll(channel.SaveTo, os.ModePerm)
+		if err != nil {
+			log.Fatalf("cannot create directory at: %s: %v\n", channel.SaveTo, err)
+			os.Exit(-1)
+		}
+	}
 }
 
 func main() {
@@ -77,7 +103,7 @@ func main() {
 	go func(){
 		recording := make(map[string]bool)
 		for {
-			newLive := <- newLiveStreamChan
+			newLive := <-newLiveStreamChan
 			videoID := newLive.LiveItemInfo.ID.VideoID
 			if _, ok := recording[newLive.LiveItemInfo.ID.VideoID]; !ok {
 				recording[newLive.LiveItemInfo.ID.VideoID] = true
@@ -103,25 +129,6 @@ func main() {
 			}
 		}
 	}()
-
-	channelReq := make([]*http.Request, len(cfg.Channels))
-	for index, channel := range cfg.Channels {
-		url := fmt.Sprintf("https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=%s&type=video&eventType=live&key=%s", channel.ID, cfg.APIKey)
-		req, err := http.NewRequest("GET", url, nil)
-		if err != nil {
-			log.Fatalf("cannot new httpRequest: %v\n", err)
-			os.Exit(-1)
-		}
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_0_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36")
-		req.Header.Set("Host", "www.youtube.com")
-		channelReq[index] = req
-
-		err = os.MkdirAll(channel.SaveTo, os.ModePerm)
-		if err != nil {
-			log.Fatalf("cannot create directory at: %s: %v\n", channel.SaveTo, err)
-			os.Exit(-1)
-		}
-	}
 
 	go func() {
 		client := &http.Client{}
@@ -165,6 +172,7 @@ func main() {
 			}
 
 			time.Sleep(time.Duration(cfg.QueryInterval) * time.Minute)
+			reloadConfig()
 		}
 	}()
 
