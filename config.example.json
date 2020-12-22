@@ -1,0 +1,20 @@
+{
+  "channels": [
+    {
+      "id": "UCoSrY_IQQVpmIRZ9Xf-y93g",
+      "save_to": "garwgura"
+    },
+    {
+      "id": "UC1opHUrw8rvnsadT-iGp7Cg",
+      "save_to": "aqua"
+    },
+    {
+      "id": "UC1DCedRgGHBdm81E1llLhOQ",
+      "save_to": "pekora"
+    }
+  ],
+  "APIKey": "YOUR YOUTUBE DATA V3 API KEY",
+  "python": "/usr/local/bin/python3",
+  "log_level": "debug",
+  "query_interval": 3
+}

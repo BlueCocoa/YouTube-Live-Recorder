@@ -1,0 +1,6 @@
+YouTube-Live-Recorder
+.DS_Store
+config.json
+build/
+.idea/**
+
