@@ -19,6 +19,19 @@ type NewLiveStreamEvent struct {
 	LiveItemInfo LiveItem
 }
 
+type YouTubeDLProcess struct {
+	Event NewLiveStreamEvent
+	Process *exec.Cmd
+	StartTime time.Time
+}
+
+type YouTubeDLProcessDidTerminate struct {
+	Event NewLiveStreamEvent
+	Process *exec.Cmd
+	TerminateTime time.Time
+	Err error
+}
+
 type LiveItemID struct {
 	Kind string `json:"kind"`
 	VideoID string `json:"videoId"`
@@ -42,13 +55,15 @@ type Response struct {
 var configPath string
 var cfg config.Config
 var channelReq []*http.Request
+var newYouTubeDLProcess chan YouTubeDLProcess
+var youTubeDLProcessDidTerminate chan YouTubeDLProcessDidTerminate
+var confPtr *string
 func init() {
+	confPtr = flag.String("conf", "config.json", "Path to the config file")
 	reloadConfig()
 }
 
 func reloadConfig() {
-	// command line args
-	confPtr := flag.String("conf", "config.json", "Path to the config file")
 	configPath = *confPtr
 
 	// read config
@@ -97,9 +112,35 @@ func reloadConfig() {
 	}
 }
 
+func manageYouTubeDLProcess() {
+	processes := make(map[string]YouTubeDLProcess)
+	for {
+		select {
+		case process := <-newYouTubeDLProcess:
+			processes[process.Event.LiveItemInfo.ID.VideoID] = process
+			log.Infof("currently %d YouTube processes running", len(processes))
+		case terminate := <-youTubeDLProcessDidTerminate:
+			if proc, ok := processes[terminate.Event.LiveItemInfo.ID.VideoID]; ok {
+				err := terminate.Err
+				videoID := proc.Event.LiveItemInfo.ID.VideoID
+				youtubeVideoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+				if err != nil {
+					log.Errorf("error occurred while recording %s: %v", youtubeVideoURL, err)
+				} else {
+					log.Infof("live stream has ended: %s", youtubeVideoURL)
+				}
+				delete(processes, videoID)
+			}
+		}
+	}
+}
+
 func main() {
 	newLiveStreamChan := make(chan NewLiveStreamEvent)
+	newYouTubeDLProcess = make(chan YouTubeDLProcess)
+	youTubeDLProcessDidTerminate = make(chan YouTubeDLProcessDidTerminate)
 
+	go manageYouTubeDLProcess()
 	go func(){
 		recording := make(map[string]bool)
 		for {
@@ -117,13 +158,19 @@ func main() {
 					log.Errorln(err)
 				}
 				pid := cmd.Process.Pid
-				log.Infof("start recording live: %s [FFmpeg: %d]\n", youtubeVideoURL, pid)
+				log.Infof("start recording live: %s [FFmpeg: %d]", youtubeVideoURL, pid)
+				newYouTubeDLProcess <- YouTubeDLProcess{
+					Event: newLive,
+					Process: cmd,
+					StartTime: time.Now(),
+				}
 				go func() {
 					err = cmd.Wait()
-					if err != nil {
-						log.Errorf("error occurred while recording %s: %v", youtubeVideoURL, err)
-					} else {
-						log.Infof("live stream has ended: %s", youtubeVideoURL)
+					youTubeDLProcessDidTerminate <- YouTubeDLProcessDidTerminate{
+						Event:         newLive,
+						Process:       cmd,
+						TerminateTime: time.Now(),
+						Err:           err,
 					}
 				}()
 			}
